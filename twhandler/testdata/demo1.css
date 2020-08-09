@@ -1,0 +1,5 @@
+@tailwind base;
+
+.test1 {
+    @apply px-1;
+}

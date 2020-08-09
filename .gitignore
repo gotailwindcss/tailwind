@@ -1,0 +1,4 @@
+*.out
+*.test
+upstream/out
+.vscode

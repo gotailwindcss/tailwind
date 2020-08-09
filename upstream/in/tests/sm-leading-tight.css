@@ -1,0 +1,3 @@
+.test-leading-tight {
+    @apply sm\:leading-tight;
+}
