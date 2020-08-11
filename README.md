@@ -1,4 +1,4 @@
-# A Tailwind CSS implementation in Go
+# A Tailwind CSS implementation in Go (wip, check back in a week or two)
 
 (Planned) Features:
 
