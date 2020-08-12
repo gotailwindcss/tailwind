@@ -23,6 +23,8 @@
 
 ## Library Usage
 
+### Embedded TailwindCSS
+
 ## HTTP Handler
 
 ### Compression

@@ -1,11 +1,11 @@
 package tailwind
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/tdewolff/parse/v2/css"
 )
@@ -33,10 +33,11 @@ func New(out io.Writer, dist Dist) *Converter {
 // CSS file with the appropriate @ directives processed.
 // Inputs are processed in the order they are added (see e.g. AddReader()).
 type Converter struct {
-	out      io.Writer
-	inputs   []*input
-	dist     Dist // tailwind is sourced from here
-	*applier      // initialized as needed
+	out          io.Writer
+	inputs       []*input
+	dist         Dist // tailwind is sourced from here
+	*applier          // initialized as needed
+	postProcFunc func(out io.Writer, in io.Reader) error
 }
 
 type input struct {
@@ -52,6 +53,12 @@ type input struct {
 // func (c *Converter) SetDisallow(rule ...string) {
 // 	panic(fmt.Errorf("not yet implemented"))
 // }
+
+// SetPostProcFunc sets the function that is called to post-process the output of the converter.
+// The typical use of this is for minification.
+func (c *Converter) SetPostProcFunc(f func(out io.Writer, in io.Reader) error) {
+	c.postProcFunc = f
+}
 
 // AddReader adds an input source. The name is used only in error
 // messages to indicate the source. And r is the CSS source to be processed,
@@ -84,13 +91,33 @@ func (c *Converter) Run() (reterr error) {
 		}
 	}()
 
-	w := bufio.NewWriter(c.out)
-	defer func() { // ensure we always flush, and record the error if no other
-		err := w.Flush()
-		if err != nil && reterr == nil {
-			reterr = err
-		}
-	}()
+	// w := bufio.NewWriter(c.out)
+	// defer func() { // ensure we always flush, and record the error if no other
+	// 	err := w.Flush()
+	// 	if err != nil && reterr == nil {
+	// 		reterr = err
+	// 	}
+	// }()
+
+	var w io.Writer = c.out
+
+	// if postProcFunc is specified then use a pipe to integrate it
+	if c.postProcFunc != nil {
+		pr, pw := io.Pipe()
+		w = pw
+		var wg sync.WaitGroup
+		wg.Add(1)
+		defer wg.Wait()
+		defer pw.Close()
+
+		go func() {
+			defer wg.Done()
+			err := c.postProcFunc(c.out, pr)
+			if err != nil && reterr == nil {
+				reterr = err
+			}
+		}()
+	}
 
 	for _, in := range c.inputs {
 		p := css.NewParser(in.r, in.isInline)
@@ -100,135 +127,12 @@ func (c *Converter) Run() (reterr error) {
 			return err
 		}
 
-		// nextInput:
-		// 	for {
-
-		// 		chk2 := func(n int, err error) {
-		// 			if err != nil {
-		// 				panic(fmt.Errorf("error in %q at offset %d: %w", in.name, p.Offset(), err))
-		// 			}
-		// 		}
-		// 		chk := func(err error) { chk2(0, err) }
-
-		// 		gt, tt, data := p.Next()
-		// 		_ = tt
-
-		// 		switch gt {
-
-		// 		case css.ErrorGrammar:
-		// 			err := p.Err()
-		// 			if errors.Is(err, io.EOF) {
-		// 				break nextInput
-		// 			}
-		// 			return fmt.Errorf("%s: %w", in.name, err)
-
-		// 		case css.AtRuleGrammar:
-
-		// 			// log.Printf("AtRuleGrammar data: %s and values: %#v", data, p.Values())
-
-		// 			switch {
-
-		// 			case bytes.Equal(data, []byte("@tailwind")):
-		// 				tokens := trimTokenWs(p.Values())
-		// 				if len(tokens) != 1 {
-		// 					return fmt.Errorf("@tailwind should be followed by exactly one token, instead found: %v", tokens)
-		// 				}
-		// 				token := tokens[0]
-		// 				if token.TokenType != css.IdentToken {
-		// 					return fmt.Errorf("@tailwind should be followed by an identifier token, instead found: %v", token)
-		// 				}
-		// 				switch string(token.Data) {
-		// 				case "base":
-		// 					// panic("TODO: @tailwind base not yet implemented")
-		// 					chk2(fmt.Fprintf(w, "%s", twbase()))
-		// 				case "components":
-		// 					panic("TODO: @tailwind components not yet implemented")
-		// 				case "utilities":
-		// 					panic("TODO: @tailwind utilities not yet implemented")
-		// 				default:
-		// 					return fmt.Errorf("@tailwind followed by unknown identifier: %s", token.Data)
-		// 				}
-
-		// 			case bytes.Equal(data, []byte("@apply")):
-		// 				panic("TODO: @apply")
-
-		// 			default: // other @ rules just get copied verbatim
-		// 				chk2(w.Write(data))
-		// 				chk(writeTokens(w, p.Values()...))
-		// 				chk(w.WriteByte(';'))
-
-		// 			}
-
-		// 		case css.BeginAtRuleGrammar, css.BeginRulesetGrammar:
-		// 			chk2(w.Write(data))
-		// 			chk(writeTokens(w, p.Values()...))
-		// 			chk(w.WriteByte('{'))
-
-		// 		case css.DeclarationGrammar:
-		// 			chk2(w.Write(data))
-		// 			chk(w.WriteByte(':'))
-		// 			chk(writeTokens(w, p.Values()...))
-		// 			chk(w.WriteByte(';'))
-
-		// 		case css.QualifiedRuleGrammar:
-		// 			chk2(w.Write(data)) // TODO: handle comma value
-
-		// 		case css.CustomPropertyGrammar:
-		// 			chk2(w.Write(data)) // TODO: need value
-
-		// 		case css.TokenGrammar:
-		// 			// return fmt.Errorf("unexpected token grammer (<!-- or --> not supported) in %q at %d", in.name, p.Offset())
-		// 			continue // just skip
-
-		// 		case css.EndRulesetGrammar:
-		// 			chk2(w.Write(data))
-
-		// 		default: // verify we aren't missing a type
-		// 			panic(fmt.Errorf("unexpected grammar type %v at offset %v", gt, p.Offset()))
-
-		// 		}
-
-		// 		// if gt == css.ErrorGrammar {
-		// 		// } else if gt == css.AtRuleGrammar || gt == css.BeginAtRuleGrammar || gt == css.BeginRulesetGrammar || gt == css.DeclarationGrammar {
-
-		// 		// 	log.Printf("gt=%v, data=%s", gt, data)
-		// 		// 	out += string(data)
-		// 		// 	if gt == css.DeclarationGrammar {
-		// 		// 		out += ":"
-		// 		// 	}
-		// 		// 	for _, val := range p.Values() {
-		// 		// 		log.Printf("val=%s", val.Data)
-		// 		// 		out += string(val.Data)
-		// 		// 	}
-		// 		// 	if gt == css.BeginAtRuleGrammar || gt == css.BeginRulesetGrammar {
-		// 		// 		out += "{"
-		// 		// 	} else if gt == css.AtRuleGrammar || gt == css.DeclarationGrammar {
-		// 		// 		out += ";"
-		// 		// 	}
-
-		// 		// 	// QualifiedRuleGrammar - this we absolutley need - comma separated selectors
-		// 		// 	// CustomProperty - for --custom-prop: huh
-		// 		// 	// TokenGrammar corresponds to <!-- and -->  ? need to read more into CSS spec but it's not something we need for tailwind
-
-		// 		// } else {
-		// 		// 	log.Printf("gt=%v", gt)
-		// 		// 	out += string(data)
-		// 		// }
-		// 	}
-
 	}
 
 	return nil
 }
 
 func (c *Converter) runParse(name string, p *css.Parser, w io.Writer) error {
-
-	// chk2 := func(n int, err error) {
-	// 	if err != nil {
-	// 		panic(fmt.Errorf("error in %q at offset %d: %w", in.name, p.Offset(), err))
-	// 	}
-	// }
-	// chk := func(err error) { chk2(0, err) }
 
 	for {
 
@@ -249,8 +153,6 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer) error {
 			return fmt.Errorf("%s: %w", name, err)
 
 		case css.AtRuleGrammar:
-
-			// log.Printf("AtRuleGrammar data: %s and values: %#v", data, p.Values())
 
 			switch {
 
@@ -340,9 +242,6 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer) error {
 				if err != nil {
 					return err
 				}
-				// chk2(w.Write(data))
-				// chk(writeTokens(w, p.Values()...))
-				// chk(w.WriteByte(';'))
 
 			}
 
@@ -351,13 +250,8 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer) error {
 			if err != nil {
 				return err
 			}
-			// chk2(w.Write(data))
-			// chk(writeTokens(w, p.Values()...))
-			// chk(w.WriteByte('{'))
 
 		case css.BeginRulesetGrammar:
-			// log.Printf("BeginRulesetGrammar: data=%q, p.Values=%v", data, p.Values())
-			// log.Printf("BeginRulesetGrammar: classes=%v (values=%v)", toklistClasses(p.Values()), p.Values())
 
 			err := write(w, data, p.Values(), '{')
 			if err != nil {
@@ -369,18 +263,8 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer) error {
 			if err != nil {
 				return err
 			}
-			// chk2(w.Write(data))
-			// chk(w.WriteByte(':'))
-			// chk(writeTokens(w, p.Values()...))
-			// chk(w.WriteByte(';'))
 
 		case css.QualifiedRuleGrammar:
-			// log.Printf("QualifiedRuleGrammar: data=%q, p.Values=%v", data, p.Values())
-			// panic("converter: QualifiedRuleGrammar not supported")
-			// err := write(w, data)
-			// if err != nil {
-			// 	return err
-			// }
 			// NOTE: this is used for rules like: b,strong { ...
 			// we'll get a QualifiedRuleGrammar entry with empty data and p.Values()
 			// has the 'b' in it.
@@ -396,7 +280,6 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer) error {
 			}
 
 		case css.TokenGrammar:
-			// return fmt.Errorf("unexpected token grammer (<!-- or --> not supported) in %q at %d", in.name, p.Offset())
 			continue // just skip
 
 		case css.CommentGrammar:
@@ -467,14 +350,6 @@ func write(w io.Writer, what ...interface{}) error {
 			}
 		}
 
-		// if toks, ok := i.([]css.Token); ok {
-		// 	err := writeTokens(w, toks...)
-		// 	if err != nil {
-		// 		return err
-		// 	}
-		// 	continue
-		// }
-		// default
 	}
 	return nil
 }

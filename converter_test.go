@@ -2,6 +2,8 @@ package tailwind_test
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"regexp"
 	"sort"
 	"strings"
@@ -9,6 +11,8 @@ import (
 
 	"github.com/gotailwindcss/tailwind"
 	"github.com/gotailwindcss/tailwind/twembed"
+	"github.com/tdewolff/minify/v2"
+	"github.com/tdewolff/minify/v2/css"
 )
 
 // type mapFS map[string]string
@@ -29,6 +33,27 @@ import (
 // func (mf *mapFSFile) Stat() (os.FileInfo, error) {
 // 	panic("not implemented")
 // }
+
+func ExampleConverter_SetPostProcFunc() {
+
+	var buf bytes.Buffer
+	conv := tailwind.New(&buf, twembed.New())
+	conv.SetPostProcFunc(func(out io.Writer, in io.Reader) error {
+		m := minify.New()
+		m.AddFunc("text/css", css.Minify)
+		return m.Minify("text/css", out, in)
+	})
+	conv.AddReader("input.css", strings.NewReader(`.test1 { @apply font-bold; }`), false)
+	err := conv.Run()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("%s", buf.String())
+
+	// notice the missing trailing semicolon
+
+	// Output: .test1{font-weight:700}
+}
 
 func TestConverter(t *testing.T) {
 
