@@ -91,14 +91,6 @@ func (c *Converter) Run() (reterr error) {
 		}
 	}()
 
-	// w := bufio.NewWriter(c.out)
-	// defer func() { // ensure we always flush, and record the error if no other
-	// 	err := w.Flush()
-	// 	if err != nil && reterr == nil {
-	// 		reterr = err
-	// 	}
-	// }()
-
 	var w io.Writer = c.out
 
 	// if postProcFunc is specified then use a pipe to integrate it
@@ -252,7 +244,6 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer) error {
 			}
 
 		case css.BeginRulesetGrammar:
-
 			err := write(w, data, p.Values(), '{')
 			if err != nil {
 				return err
