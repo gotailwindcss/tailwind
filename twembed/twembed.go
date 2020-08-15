@@ -42,7 +42,5 @@ func (d Dist) OpenDist(name string) (io.ReadCloser, error) {
 
 // PurgeKeyMap returns a map of all of the possible keys that can be purged.
 func (d Dist) PurgeKeyMap() map[string]struct{} {
-	ret := make(map[string]struct{}, 1024)
-	panic(fmt.Errorf("not yet implemented"))
-	return ret
+	return twPurgeKeyMap
 }

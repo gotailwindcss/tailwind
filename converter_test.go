@@ -11,6 +11,7 @@ import (
 
 	"github.com/gotailwindcss/tailwind"
 	"github.com/gotailwindcss/tailwind/twembed"
+	"github.com/gotailwindcss/tailwind/twpurge"
 	"github.com/tdewolff/minify/v2"
 	"github.com/tdewolff/minify/v2/css"
 )
@@ -58,10 +59,12 @@ func ExampleConverter_SetPostProcFunc() {
 func TestConverter(t *testing.T) {
 
 	type tcase struct {
-		name   string            // test case name
-		in     map[string]string // input files (processed alphabetical by filename)
-		out    []*regexp.Regexp  // output must match these regexps
-		outerr *regexp.Regexp    // must result in an error with text that matches this (if non-nil)
+		name   string                 // test case name
+		in     map[string]string      // input files (processed alphabetical by filename)
+		purger func() tailwind.Purger // optional purger to set on converter
+		out    []*regexp.Regexp       // output must match these regexps
+		outnot []*regexp.Regexp       // output must not match these regexps
+		outerr *regexp.Regexp         // must result in an error with text that matches this (if non-nil)
 	}
 
 	tcaseList := []tcase{
@@ -172,6 +175,29 @@ func TestConverter(t *testing.T) {
 				regexp.MustCompile(regexp.QuoteMeta(`.test{padding-left:0.25rem;padding-right:0.25rem;padding-top:0.5rem;padding-bottom:0.5rem;}`)),
 			},
 		},
+		{
+			name: "purge1",
+			in: map[string]string{
+				"001.css": `@tailwind components; @tailwind utilities; .test { @apply px-1 py-2; }`,
+			},
+			purger: func() tailwind.Purger {
+				p := twpurge.MustNew(twembed.New())
+				_ = p.ParseReader(strings.NewReader(`<html><body class="p-1 md:bg-purple-500"></body></html>`))
+				return p
+			},
+			out: []*regexp.Regexp{
+				// should not have been purged
+				regexp.MustCompile(regexp.QuoteMeta(`.p-1{`)),
+				regexp.MustCompile(regexp.QuoteMeta(`.test{padding-left:0.25rem`)),
+				regexp.MustCompile(regexp.QuoteMeta(`.md\:bg-purple-500`) + `\b`),
+				// components stuff is always present
+				regexp.MustCompile(regexp.QuoteMeta(`.container{`)),
+			},
+			outnot: []*regexp.Regexp{
+				// others stuff should not appear
+				regexp.MustCompile(regexp.QuoteMeta(`.bg-purple-600`)),
+			},
+		},
 	}
 
 	for _, tc := range tcaseList {
@@ -179,6 +205,12 @@ func TestConverter(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			c := tailwind.New(&buf, twembed.New())
+			if tc.purger != nil {
+				p := tc.purger()
+				if p != nil {
+					c.SetPurger(p)
+				}
+			}
 			klist := make([]string, len(tc.in))
 			for k := range tc.in {
 				klist = append(klist, k)
@@ -201,6 +233,11 @@ func TestConverter(t *testing.T) {
 			for _, outre := range tc.out {
 				if !outre.MatchString(bufstr) {
 					t.Errorf("output failed to match regexp: %s", outre.String())
+				}
+			}
+			for _, outnotre := range tc.outnot {
+				if outnotre.MatchString(bufstr) {
+					t.Errorf("output unexpectedly matched regexp: %s", outnotre.String())
 				}
 			}
 			if t.Failed() {

@@ -38,6 +38,7 @@ type Converter struct {
 	dist         Dist // tailwind is sourced from here
 	*applier          // initialized as needed
 	postProcFunc func(out io.Writer, in io.Reader) error
+	purger       Purger // the purger, if any
 }
 
 type input struct {
@@ -58,6 +59,10 @@ type input struct {
 // The typical use of this is for minification.
 func (c *Converter) SetPostProcFunc(f func(out io.Writer, in io.Reader) error) {
 	c.postProcFunc = f
+}
+
+func (c *Converter) SetPurger(purger Purger) {
+	c.purger = purger
 }
 
 // AddReader adds an input source. The name is used only in error
@@ -114,7 +119,7 @@ func (c *Converter) Run() (reterr error) {
 	for _, in := range c.inputs {
 		p := css.NewParser(in.r, in.isInline)
 
-		err := c.runParse(in.name, p, w)
+		err := c.runParse(in.name, p, w, false)
 		if err != nil {
 			return err
 		}
@@ -124,7 +129,12 @@ func (c *Converter) Run() (reterr error) {
 	return nil
 }
 
-func (c *Converter) runParse(name string, p *css.Parser, w io.Writer) error {
+func (c *Converter) runParse(name string, p *css.Parser, w io.Writer, doPurge bool) error {
+
+	// set to true when we enter a ruleset that we're omitting from the output
+	inPurgeRule := false
+	// set to true when we find a rule with a comma in it, which we then just decline to purge
+	isQualifiedRule := false
 
 	for {
 
@@ -167,7 +177,7 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer) error {
 					defer rc.Close()
 
 					subp := css.NewParser(rc, false)
-					err = c.runParse("[tailwind-dist/base]", subp, w)
+					err = c.runParse("[tailwind-dist/base]", subp, w, false)
 					if err != nil {
 						return err
 					}
@@ -181,7 +191,7 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer) error {
 					defer rc.Close()
 
 					subp := css.NewParser(rc, false)
-					err = c.runParse("[tailwind-dist/components]", subp, w)
+					err = c.runParse("[tailwind-dist/components]", subp, w, false)
 					if err != nil {
 						return err
 					}
@@ -195,7 +205,7 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer) error {
 					defer rc.Close()
 
 					subp := css.NewParser(rc, false)
-					err = c.runParse("[tailwind-dist/utilities]", subp, w)
+					err = c.runParse("[tailwind-dist/utilities]", subp, w, true) // for utilities we enable purging (if available)
 					if err != nil {
 						return err
 					}
@@ -243,14 +253,8 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer) error {
 				return err
 			}
 
-		case css.BeginRulesetGrammar:
-			err := write(w, data, p.Values(), '{')
-			if err != nil {
-				return err
-			}
-
-		case css.DeclarationGrammar:
-			err := write(w, data, ':', p.Values(), ';')
+		case css.EndAtRuleGrammar:
+			err := write(w, data)
 			if err != nil {
 				return err
 			}
@@ -259,28 +263,58 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer) error {
 			// NOTE: this is used for rules like: b,strong { ...
 			// we'll get a QualifiedRuleGrammar entry with empty data and p.Values()
 			// has the 'b' in it.
+			isQualifiedRule = true
 			err := write(w, p.Values(), ',')
 			if err != nil {
 				return err
 			}
 
-		case css.CustomPropertyGrammar:
-			err := write(w, data, ':', p.Values(), ';')
-			if err != nil {
-				return err
+		case css.BeginRulesetGrammar:
+			// log.Printf("BeginRulesetGrammar: data=%s; tokens = %v", data, p.Values())
+			if doPurge && !isQualifiedRule && c.purger != nil {
+				key := ruleToPurgeKey(data, p.Values())
+				if c.purger.ShouldPurgeKey(key) {
+					inPurgeRule = true
+				}
+			}
+			isQualifiedRule = false // once we start a ruleset, this goes away
+			if !inPurgeRule {
+				err := write(w, data, p.Values(), '{')
+				if err != nil {
+					return err
+				}
 			}
 
+		case css.DeclarationGrammar:
+			if !inPurgeRule {
+				err := write(w, data, ':', p.Values(), ';')
+				if err != nil {
+					return err
+				}
+			}
+
+		case css.CustomPropertyGrammar:
+			if !inPurgeRule {
+				err := write(w, data, ':', p.Values(), ';')
+				if err != nil {
+					return err
+				}
+			}
+
+		case css.EndRulesetGrammar:
+			if !inPurgeRule {
+				err := write(w, data)
+				if err != nil {
+					return err
+				}
+			}
+			inPurgeRule = false
+
 		case css.TokenGrammar:
-			continue // just skip
+			continue // HTML-style comment, just skip
 
 		case css.CommentGrammar:
 			continue // strip comments
-
-		case css.EndRulesetGrammar, css.EndAtRuleGrammar:
-			err := write(w, data)
-			if err != nil {
-				return err
-			}
 
 		default: // verify we aren't missing a type
 			panic(fmt.Errorf("%s: unexpected grammar type %v at offset %v", name, gt, p.Offset()))
@@ -381,4 +415,62 @@ func tokensToIdents(tokens []css.Token) ([]string, error) {
 	}
 
 	return ret, nil
+}
+
+// takes the rule info from a BeginRulesetGrammar returns the purge key if there is one or else empty string
+func ruleToPurgeKey(data []byte, tokens []css.Token) string {
+
+	if len(data) != 0 {
+		panic("unexpected data")
+	}
+
+	// we're looking for Delim('.') followed by Ident() - we disregard everything after
+	if len(tokens) < 2 {
+		return ""
+	}
+	if tokens[0].TokenType != css.DelimToken || !bytes.Equal(tokens[0].Data, []byte(".")) {
+		return ""
+	}
+	if tokens[1].TokenType != css.IdentToken {
+		return ""
+	}
+
+	// if we get here we're good, we just need to unescape the ident (e.g. `\:` becomes just `:`)
+	return cssUnescape(tokens[1].Data)
+}
+
+// Purger is something which can tell us if a key should be purged from the final output (because it is not used).
+// See package twpurge for default implementation.
+type Purger interface {
+	ShouldPurgeKey(k string) bool
+}
+
+func cssUnescape(b []byte) string {
+
+	var buf bytes.Buffer
+
+	var i int
+	for i = 0; i < len(b); i++ {
+		if b[i] == '\\' {
+			// set up buf with the stuff we've already scanned
+			buf.Grow(len(b))
+			buf.Write(b[:i])
+			goto foundEsc
+		}
+		continue
+	}
+	// no escaping needed
+	return string(b)
+
+foundEsc:
+	inEsc := false
+	for ; i < len(b); i++ {
+		if b[i] == '\\' && !inEsc {
+			inEsc = true
+			continue
+		}
+		buf.WriteByte(b[i])
+		inEsc = false
+	}
+	return buf.String()
 }

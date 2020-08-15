@@ -3,7 +3,6 @@
 package twfiles
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 )
@@ -50,9 +49,9 @@ func (hf *HTTPFiles) OpenDist(name string) (io.ReadCloser, error) {
 	return f, nil
 }
 
-// PurgeKeyMap returns a map of all of the possible keys that can be purged.
-func (hf *HTTPFiles) PurgeKeyMap() map[string]struct{} {
-	ret := make(map[string]struct{}, 1024)
-	panic(fmt.Errorf("not yet implemented"))
-	return ret
-}
+// // PurgeKeyMap returns a map of all of the possible keys that can be purged.
+// func (hf *HTTPFiles) PurgeKeyMap() map[string]struct{} {
+// 	ret := make(map[string]struct{}, 1024)
+// 	panic(fmt.Errorf("not yet implemented"))
+// 	return ret
+// }

@@ -3,12 +3,18 @@ package twpurge
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/tdewolff/parse/v2/css"
 )
+
+// TODO: PurgeDir - reads directory, can reload upon demand (first call to ShouldPurgeKey) after X time, by default only loads first time
+// Should we/can we abstract this out to some sort of reload function that gets invoked?  Or is that too much, maybe we just go simple.
 
 // type Purger struct {
 // }
@@ -57,16 +63,52 @@ var MatchDefault = func(fn string) bool {
 // vet the output of tailwind.Converter to eliminate unused styles.
 type Purger struct {
 	purgeKeyMap  map[string]struct{} // all possible purge keys, passed in from New
-	parsedKeyMap map[string]struct{} // the keys parsed from the markup (filtered to include only purgeKeyMap entries if not nil)
+	parsedKeyMap map[string]struct{} // the keys parsed from the markup (filtered to include only purgeKeyMap entries if not nil), these are the keys to be kept during conversion
 	tokenizer    Tokenizer
 }
 
-// New returns a new Purger instance. If purgeKeyMap is not nil, it is a map
+// TODO:
+// New(Dist)
+// NewFromMap
+// BuildPurgeKeyMap(Dist) map
+// and then twfiles does not have purge support, but twembed can have it all preprocessed
+// New(Dist) looks for interface and calls BuildPurgeKeyMap if not implemeneted
+
+// MustNew is like New but panics upon error.
+func MustNew(dist Dist) *Purger {
+	ret, err := New(dist)
+	if err != nil {
+		panic(err)
+	}
+	return ret
+}
+
+// New returns a new Purger instance.  Uses PurgeKeysFromDist.
+func New(dist Dist) (*Purger, error) {
+
+	// moved to PurgeKeysFromDist
+	// pkmr, ok := dist.(purgeKeyMapper)
+	// if ok {
+	// 	return NewFromMap(pkmr.PurgeKeyMap()), nil
+	// }
+
+	pkmap, err := PurgeKeysFromDist(dist)
+	if err != nil {
+		return nil, err
+	}
+	return NewFromMap(pkmap), nil
+}
+
+type purgeKeyMapper interface {
+	PurgeKeyMap() map[string]struct{}
+}
+
+// NewFromMap returns a new Purger instance. If purgeKeyMap is not nil, it is a map
 // of all the possible keys that can be purged, which is then used during
 // markup parsing to be able to scan for just the purge keys that are relevant.
 // Passing nil will still result in proper function but will use more memory
 // and potentially be slower.
-func New(purgeKeyMap map[string]struct{}) *Purger {
+func NewFromMap(purgeKeyMap map[string]struct{}) *Purger {
 	return &Purger{purgeKeyMap: purgeKeyMap, parsedKeyMap: make(map[string]struct{})}
 }
 
@@ -97,8 +139,26 @@ func (p *Purger) ParseReader(r io.Reader) error {
 	if p.parsedKeyMap == nil {
 		p.parsedKeyMap = make(map[string]struct{})
 	}
-	// TODO: scanning algo
-	panic(fmt.Errorf("not yet implemented"))
+
+	t := NewDefaultTokenizer(r)
+	for {
+		b, err := t.NextToken()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		bstr := string(b) // FIXME: cheating with zero-alloc unsafe cast would be appropriate here
+		found := true
+		if p.purgeKeyMap != nil {
+			_, found = p.purgeKeyMap[bstr]
+		}
+		if found {
+			p.parsedKeyMap[bstr] = struct{}{}
+		}
+	}
+
 }
 
 func (p *Purger) ParseFile(fpath string) error {
@@ -112,7 +172,7 @@ func (p *Purger) ParseFile(fpath string) error {
 
 func (p *Purger) ShouldPurgeKey(k string) bool {
 	_, ok := p.parsedKeyMap[k]
-	return ok
+	return !ok
 }
 
 // Tokenizer returns the next token from a markup file.
@@ -204,4 +264,132 @@ func (t *DefaultTokenizer) NextToken() ([]byte, error) {
 		return nil, err
 	}
 	return nil, io.EOF
+}
+
+// Dist matches tailwind.Dist
+type Dist interface {
+	OpenDist(name string) (io.ReadCloser, error)
+}
+
+// PurgeKeysFromDist runs PurgeKeysFromReader on the appropriate(s) file from the dist.
+// A check is done to see if Dist implements interface { PurgeKeyMap() map[string]struct{} }
+// and this is used if avialable.  Otherwise the appropriate files(s) are processed from
+// the dist using PurgeKeysFromReader.
+func PurgeKeysFromDist(dist Dist) (map[string]struct{}, error) {
+
+	pkmr, ok := dist.(purgeKeyMapper)
+	if ok {
+		return pkmr.PurgeKeyMap(), nil
+	}
+
+	f, err := dist.OpenDist("utilities")
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return PurgeKeysFromReader(f)
+}
+
+// takes the rule info from a BeginRulesetGrammar returns the purge key if there is one or else empty string
+func ruleToPurgeKey(data []byte, tokens []css.Token) string {
+
+	if len(data) != 0 {
+		panic("unexpected data")
+	}
+
+	// we're looking for Delim('.') followed by Ident() - we disregard everything after
+	if len(tokens) < 2 {
+		return ""
+	}
+	if tokens[0].TokenType != css.DelimToken || !bytes.Equal(tokens[0].Data, []byte(".")) {
+		return ""
+	}
+	if tokens[1].TokenType != css.IdentToken {
+		return ""
+	}
+
+	// if we get here we're good, we just need to unescape the ident (e.g. `\:` becomes just `:`)
+	return cssUnescape(tokens[1].Data)
+}
+
+func cssUnescape(b []byte) string {
+
+	var buf bytes.Buffer
+
+	var i int
+	for i = 0; i < len(b); i++ {
+		if b[i] == '\\' {
+			// set up buf with the stuff we've already scanned
+			buf.Grow(len(b))
+			buf.Write(b[:i])
+			goto foundEsc
+		}
+		continue
+	}
+	// no escaping needed
+	return string(b)
+
+foundEsc:
+	inEsc := false
+	for ; i < len(b); i++ {
+		if b[i] == '\\' && !inEsc {
+			inEsc = true
+			continue
+		}
+		buf.WriteByte(b[i])
+		inEsc = false
+	}
+	return buf.String()
+}
+
+// PurgeKeysFromReader parses the contents of this reader as CSS and builds a map
+// of purge keys.
+func PurgeKeysFromReader(r io.Reader) (map[string]struct{}, error) {
+	ret := make(map[string]struct{})
+
+	// func (c *Converter) runParse(name string, p *css.Parser, w io.Writer, doPurge bool) error {
+	p := css.NewParser(r, false)
+
+mainLoop:
+	for {
+
+		gt, tt, data := p.Next()
+		_, _ = tt, data
+
+		switch gt {
+
+		case css.ErrorGrammar:
+			err := p.Err()
+			if errors.Is(err, io.EOF) {
+				break mainLoop
+			}
+			return ret, err
+
+		case css.AtRuleGrammar:
+		case css.BeginAtRuleGrammar:
+		case css.EndAtRuleGrammar:
+		case css.QualifiedRuleGrammar:
+			k := ruleToPurgeKey(nil, p.Values())
+			if k != "" {
+				ret[k] = struct{}{}
+			}
+		case css.BeginRulesetGrammar:
+			k := ruleToPurgeKey(nil, p.Values())
+			if k != "" {
+				ret[k] = struct{}{}
+			}
+		case css.DeclarationGrammar:
+		case css.CustomPropertyGrammar:
+		case css.EndRulesetGrammar:
+		case css.TokenGrammar:
+		case css.CommentGrammar:
+
+		default: // verify we aren't missing a type
+			panic(fmt.Errorf("unexpected grammar type %v at offset %v", gt, p.Offset()))
+
+		}
+
+	}
+
+	return ret, nil
 }
