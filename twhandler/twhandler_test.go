@@ -15,7 +15,7 @@ import (
 func TestHandler(t *testing.T) {
 
 	td, _ := filepath.Abs("testdata")
-	h := twhandler.New(twembed.New(), http.Dir(td), "/td1")
+	h := twhandler.New(http.Dir(td), "/td1", twembed.New())
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/td1/demo1.css", nil)

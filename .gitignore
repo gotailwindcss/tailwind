@@ -2,3 +2,4 @@
 *.test
 upstream/out
 .vscode
+cmd/gotailwindcss/gotailwindcss

@@ -13,6 +13,10 @@
 
 (show small standalone Go program with HTTP handler, compression and purging)
 
+## In Production
+
+(recommend just using static files in production - hmm, what about file hashes and such...)
+
 ## Supported Tailwind CSS Directives
 
 ## Command Line
@@ -31,6 +35,16 @@
 
 ### Caching
 
-## Purging (reduce file size)
+## Purging
+
+(reduce file size)
+
+### Purging: Scanning + Checking Approach
+
+(a bit more work to setup and use, but more efficient and gives the same results in dev and production)
+
+### Purging: Automatic
+
+(less work to setup and maintain but runs slower)
 
 ## Embedding in Go Code

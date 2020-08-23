@@ -59,12 +59,12 @@ func ExampleConverter_SetPostProcFunc() {
 func TestConverter(t *testing.T) {
 
 	type tcase struct {
-		name   string                 // test case name
-		in     map[string]string      // input files (processed alphabetical by filename)
-		purger func() tailwind.Purger // optional purger to set on converter
-		out    []*regexp.Regexp       // output must match these regexps
-		outnot []*regexp.Regexp       // output must not match these regexps
-		outerr *regexp.Regexp         // must result in an error with text that matches this (if non-nil)
+		name         string                       // test case name
+		in           map[string]string            // input files (processed alphabetical by filename)
+		purgeChecker func() tailwind.PurgeChecker // optional purgeChecker to set on converter
+		out          []*regexp.Regexp             // output must match these regexps
+		outnot       []*regexp.Regexp             // output must not match these regexps
+		outerr       *regexp.Regexp               // must result in an error with text that matches this (if non-nil)
 	}
 
 	tcaseList := []tcase{
@@ -180,10 +180,10 @@ func TestConverter(t *testing.T) {
 			in: map[string]string{
 				"001.css": `@tailwind components; @tailwind utilities; .test { @apply px-1 py-2; }`,
 			},
-			purger: func() tailwind.Purger {
-				p := twpurge.MustNew(twembed.New())
-				_ = p.ParseReader(strings.NewReader(`<html><body class="p-1 md:bg-purple-500"></body></html>`))
-				return p
+			purgeChecker: func() tailwind.PurgeChecker {
+				s, _ := twpurge.NewScannerFromDist(twembed.New())
+				_ = s.Scan(strings.NewReader(`<html><body class="p-1 md:bg-purple-500"></body></html>`))
+				return s.Map()
 			},
 			out: []*regexp.Regexp{
 				// should not have been purged
@@ -205,10 +205,10 @@ func TestConverter(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			c := tailwind.New(&buf, twembed.New())
-			if tc.purger != nil {
-				p := tc.purger()
+			if tc.purgeChecker != nil {
+				p := tc.purgeChecker()
 				if p != nil {
-					c.SetPurger(p)
+					c.SetPurgeChecker(p)
 				}
 			}
 			klist := make([]string, len(tc.in))

@@ -38,7 +38,7 @@ type Converter struct {
 	dist         Dist // tailwind is sourced from here
 	*applier          // initialized as needed
 	postProcFunc func(out io.Writer, in io.Reader) error
-	purger       Purger // the purger, if any
+	purgeChecker PurgeChecker // the purgeChecker, if any
 }
 
 type input struct {
@@ -61,8 +61,8 @@ func (c *Converter) SetPostProcFunc(f func(out io.Writer, in io.Reader) error) {
 	c.postProcFunc = f
 }
 
-func (c *Converter) SetPurger(purger Purger) {
-	c.purger = purger
+func (c *Converter) SetPurgeChecker(purgeChecker PurgeChecker) {
+	c.purgeChecker = purgeChecker
 }
 
 // AddReader adds an input source. The name is used only in error
@@ -271,9 +271,9 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer, doPurge bo
 
 		case css.BeginRulesetGrammar:
 			// log.Printf("BeginRulesetGrammar: data=%s; tokens = %v", data, p.Values())
-			if doPurge && !isQualifiedRule && c.purger != nil {
+			if doPurge && !isQualifiedRule && c.purgeChecker != nil {
 				key := ruleToPurgeKey(data, p.Values())
-				if c.purger.ShouldPurgeKey(key) {
+				if c.purgeChecker.ShouldPurgeKey(key) {
 					inPurgeRule = true
 				}
 			}
@@ -439,9 +439,9 @@ func ruleToPurgeKey(data []byte, tokens []css.Token) string {
 	return cssUnescape(tokens[1].Data)
 }
 
-// Purger is something which can tell us if a key should be purged from the final output (because it is not used).
+// PurgeChecker is something which can tell us if a key should be purged from the final output (because it is not used).
 // See package twpurge for default implementation.
-type Purger interface {
+type PurgeChecker interface {
 	ShouldPurgeKey(k string) bool
 }
 

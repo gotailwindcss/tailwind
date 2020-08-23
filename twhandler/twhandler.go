@@ -17,25 +17,67 @@ import (
 
 // New returns a Handler. TODO explain args
 // The internal cache is enabled on the Handler returned.
-func New(dist tailwind.Dist, fs http.FileSystem, pathPrefix string) *Handler {
+func New(fs http.FileSystem, pathPrefix string, dist tailwind.Dist) *Handler {
+	return NewFromFunc(fs, pathPrefix, func(w io.Writer) *tailwind.Converter {
+		return tailwind.New(w, dist)
+	})
+}
+
+// allows things like purger to be set
+func NewFromFunc(fs http.FileSystem, pathPrefix string, converterFunc func(w io.Writer) *tailwind.Converter) *Handler {
 	return &Handler{
-		dist:       dist,
-		fs:         fs,
-		pathPrefix: pathPrefix,
-		cache:      make(map[string]cacheValue),
+		converterFunc: converterFunc,
+		fs:            fs,
+		pathPrefix:    pathPrefix,
+		cache:         make(map[string]cacheValue),
+		headerFunc:    defaultHeaderFunc,
 	}
 }
 
+func defaultHeaderFunc(w http.ResponseWriter, r *http.Request) {
+	cc := w.Header().Get("Cache-Control")
+	if cc == "" {
+		// Force browser to check each time, but 304 still works.
+		w.Header().Set("Cache-Control", "no-cache")
+	}
+}
+
+// // TODO: probably a shorthand that sets up the purger, etc. would make sense
+// // enables purging for all default file types on dir
+// func NewDev(dir, pathPrefix string, dist tailwind.Dist) {
+// }
+
 // Handler serves an HTTP response for a CSS file that is process using tailwind.
 type Handler struct {
-	dist            tailwind.Dist
+	// dist            tailwind.Dist
+	converterFunc   func(w io.Writer) *tailwind.Converter
 	fs              http.FileSystem
 	notFound        http.Handler
 	pathPrefix      string
 	writeCloserFunc func(w http.ResponseWriter, r *http.Request) io.WriteCloser
 	cache           map[string]cacheValue
 	rwmu            sync.RWMutex
-	// allowFileFunc func(p string) bool
+	headerFunc      func(w http.ResponseWriter, r *http.Request)
+}
+
+// SetMaxAge calls SetHeaderFunc with a function that sets the Cache-Control header (if not already set)
+// with a corresponding maximum timeout specified in seconds.  If cache-breaking
+// URLs are in use, this is a good option to set in production.
+func (h *Handler) SetMaxAge(n int) {
+	h.SetHeaderFunc(func(w http.ResponseWriter, r *http.Request) {
+		cc := w.Header().Get("Cache-Control")
+		if cc == "" {
+			w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", n))
+		}
+	})
+}
+
+// SetHeaderFunc assigns a function that gets called immediately before a valid response is served.
+// It was added so applications could customize cache headers.  By default, the Cache-Control
+// header will be set to "no-cache" if it was not set earlier (causing the browser to check
+// each time for an updated resource - which may result in a full response or a 304).
+func (h *Handler) SetHeaderFunc(f func(w http.ResponseWriter, r *http.Request)) {
+	h.headerFunc = f
 }
 
 // SetNotFoundHandler assigns the handler that gets called when something is not found.
@@ -91,6 +133,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, fmt.Sprintf("stat failed for %s: %v", r.URL.Path, err), 500)
 		return
+	}
+
+	if h.headerFunc != nil {
+		h.headerFunc(w, r)
 	}
 
 	if h.cache != nil { // if cache enabled
@@ -190,7 +236,8 @@ func (h *Handler) process(w http.ResponseWriter, r *http.Request, rd io.Reader) 
 	// write to response (optionally via compressor from makeW), cache buffer, and hash calc'er at the same time
 	mw := io.MultiWriter(wc, &outbuf, d)
 
-	conv := tailwind.New(mw, h.dist)
+	conv := h.converterFunc(mw)
+	// conv := tailwind.New(mw, h.dist)
 	conv.AddReader(r.URL.Path, rd, false)
 	err := conv.Run()
 	if err != nil {
