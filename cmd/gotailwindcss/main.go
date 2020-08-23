@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gotailwindcss/tailwind"
@@ -14,9 +15,10 @@ import (
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
+// NOTES:
 // command line tool should provide:
 // - processing similar to npx tailwindcss build
-// - output as Go source code
+// - output as Go source code - skip for now, the workflow of CSS being served instead of embedded in a client seems to be a better way to go, let's try that first
 //   - plus internal gzipped format?
 // - probably output file auto-detection can work,
 //   if the output file is .go then it emits go src,
@@ -30,42 +32,27 @@ import (
 
 var (
 	app = kingpin.New("gotailwindcss", "Go+TailwindCSS tools")
-	// debug    = app.Flag("debug", "Enable debug mode.").Bool()
-	// serverIP = app.Flag("server", "Server address.").Default("127.0.0.1").IP()
-	v = build.Flag("verbose", "Print verbose output").Short('v').Bool()
+	v   = app.Flag("verbose", "Print verbose output").Short('v').Bool()
 
 	build          = app.Command("build", "Build CSS output")
 	buildOutput    = build.Flag("output", "Output file name, use hyphen for stdout").Short('o').Default("-").String()
-	buildPurgeScan = build.Flag("purgescan", "Scan file/folder recursively for purge keys").String()
-	buildPurgeExt  = build.Flag("purgeext", "Comma separated list of file extensions (no periods) to scan for purge keys").Default("html,vue,jsx,vugu").String()
+	buildPurgescan = build.Flag("purgescan", "Scan file/folder recursively for purge keys").String()
+	buildPurgeext  = build.Flag("purgeext", "Comma separated list of file extensions (no periods) to scan for purge keys").Default("html,vue,jsx,vugu").String()
 	buildInput     = build.Arg("input", "Input file name(s)").Strings()
-	// register     = app.Command("register", "Register a new user.")
-	// registerNick = register.Arg("nick", "Nickname for user.").Required().String()
-	// registerName = register.Arg("name", "Name of user.").Required().String()
 
-	// post        = app.Command("post", "Post a message to a channel.")
-	// postImage   = post.Flag("image", "Image to post.").File()
-	// postChannel = post.Arg("channel", "Channel to post to.").Required().String()
-	// postText    = post.Arg("text", "Text to post.").Strings()
+	purgescan       = app.Command("purgescan", "Perform a purge scan of one or more files/dirs and output the purge keys found")
+	purgescanExt    = build.Flag("ext", "Comma separated list of file extensions (no periods) to scan for purge keys").Default("html,vue,jsx,vugu").String()
+	purgescanOutput = purgescan.Flag("output", "Output file name - extension can be .go, .txt or .json and determines format").Short('o').Default("-").String()
+	purgescanNogen  = purgescan.Flag("nogen", "For .go output, do not emit a //go:generate line").Bool()
+	purgescanInput  = purgescan.Arg("input", "Input files/dirs").Strings()
+
+	// serve
+
 )
 
 var dist = twembed.New()
 
 func main() {
-
-	// FIXME: what about sequence?  if this doesn't work we should rethink: gotailwindcss in.css -o out.css
-	// (might not because i think flags must precede args)
-
-	// fo := flag.String("o", "", "Output file to write, if not specified stdout is used")
-	// foutput := flag.String("output", "", "Alias for -o")
-	// fv := flag.String("v", "", "Verbose logging (via stderr)")
-
-	// flag.Parse()
-
-	// args := flag.Args()
-
-	// app.Parse()
-	// log.Println(os.Args)
 
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 
@@ -73,12 +60,10 @@ func main() {
 
 		runBuild()
 
-	// // Post message
-	// case post.FullCommand():
-	// 	if *postImage != nil {
-	// 	}
-	// 	text := strings.Join(*postText, " ")
-	// 	println("Post:", text)
+	case purgescan.FullCommand():
+
+		runPurgescan()
+
 	default:
 		fmt.Fprintf(os.Stderr, "No command specified\n")
 		os.Exit(1)
@@ -92,33 +77,35 @@ func runBuild() {
 		log.Printf("Starting build...")
 	}
 
-	var w io.Writer
-	outpath := *buildOutput
-	if outpath == "" || outpath == "-" {
-		if *v {
-			log.Printf("Using stdout")
-		}
-		w = os.Stdout
-	} else {
-		if *v {
-			log.Printf("Creating output file: %s", outpath)
-		}
-		f, err := os.Create(outpath)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer f.Close()
-		w = f
-	}
+	w := mkout(*buildOutput)
+	defer w.Close()
+	// var w io.Writer
+	// outpath := *buildOutput
+	// if outpath == "" || outpath == "-" {
+	// 	if *v {
+	// 		log.Printf("Using stdout")
+	// 	}
+	// 	w = os.Stdout
+	// } else {
+	// 	if *v {
+	// 		log.Printf("Creating output file: %s", outpath)
+	// 	}
+	// 	f, err := os.Create(outpath)
+	// 	if err != nil {
+	// 		log.Fatal(err)
+	// 	}
+	// 	defer f.Close()
+	// 	w = f
+	// }
 
 	conv := tailwind.New(w, dist)
 
-	if *buildPurgeScan != "" {
+	if *buildPurgescan != "" {
 		if *v {
-			log.Printf("Performing purge scan on: %s", *buildPurgeScan)
+			log.Printf("Performing purge scan on: %s", *buildPurgescan)
 		}
 
-		extParts := strings.Split(*buildPurgeExt, ",")
+		extParts := strings.Split(*buildPurgeext, ",")
 		extMap := make(map[string]bool, len(extParts))
 		for _, p := range extParts {
 			extMap["."+strings.TrimPrefix(p, ".")] = true
@@ -129,7 +116,7 @@ func runBuild() {
 			log.Fatal(err)
 		}
 
-		err = filepath.Walk(*buildPurgeScan, pscanner.WalkFunc(func(fn string) bool {
+		err = filepath.Walk(*buildPurgescan, pscanner.WalkFunc(func(fn string) bool {
 			return extMap[filepath.Ext(fn)]
 		}))
 		if err != nil {
@@ -160,4 +147,114 @@ func runBuild() {
 		log.Fatal(err)
 	}
 
+}
+
+func runPurgescan() {
+
+	if *v {
+		log.Printf("Starting purge scan...")
+	}
+
+	outExt := filepath.Ext(*purgescanOutput)
+
+	w := mkout(*purgescanOutput)
+	defer w.Close()
+
+	extParts := strings.Split(*purgescanExt, ",")
+	extMap := make(map[string]bool, len(extParts))
+	for _, p := range extParts {
+		extMap["."+strings.TrimPrefix(p, ".")] = true
+	}
+
+	pscanner, err := twpurge.NewScannerFromDist(dist)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, in := range *purgescanInput {
+		err = filepath.Walk(in, pscanner.WalkFunc(func(fn string) bool {
+			return extMap[filepath.Ext(fn)]
+		}))
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	m := pscanner.Map()
+	mk := mkeys(m)
+
+	pkgName := "test123"
+
+	switch outExt {
+	case ".go":
+
+		fmt.Fprintf(w, `package %s`+"\n", pkgName)
+		fmt.Fprintf(w, "\n")
+		fmt.Fprintf(w, "// WARNING: DO NOT EDIT, THIS IS A GENERATED FILE\n")
+		fmt.Fprintf(w, "\n")
+		if !*purgescanNogen {
+			fmt.Fprintf(w, "//go:generate gotailwindcss -o %s %s\n", *purgescanOutput, strings.Join(*purgescanInput, " "))
+			fmt.Fprintf(w, "\n")
+		}
+		fmt.Fprintf(w, "// PurgeKeyMap is a list of keys which should not be purged from CSS output.\n")
+		fmt.Fprintf(w, "var PurgeKeyMap = %#v\n", (map[string]struct{})(m))
+		fmt.Fprintf(w, "\n")
+
+	case ".txt":
+		for _, k := range mk {
+			fmt.Fprintln(w, k)
+		}
+
+	case ".json":
+		fmt.Fprintf(w, "[\n")
+		for i := 0; i < len(mk); i++ {
+			k := mk[i]
+			if i < len(mk)-1 {
+				fmt.Fprintf(w, `"%s",`, k)
+			} else {
+				fmt.Fprintf(w, `"%s"`, k)
+			}
+		}
+		fmt.Fprintf(w, "]\n")
+
+	}
+
+}
+
+func mkout(outpath string) io.WriteCloser {
+
+	var ret io.WriteCloser
+	if outpath == "" || outpath == "-" {
+		if *v {
+			log.Printf("Using stdout")
+		}
+		ret = nopWriteCloser{Writer: os.Stdout}
+	} else {
+		if *v {
+			log.Printf("Creating output file: %s", outpath)
+		}
+		f, err := os.Create(outpath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		ret = f
+	}
+
+	return ret
+}
+
+func mkeys(m map[string]struct{}) (ret []string) {
+	for k := range m {
+		ret = append(ret, k)
+	}
+	sort.Strings(ret)
+	return
+}
+
+type nopWriteCloser struct {
+	io.Writer
+}
+
+func (w nopWriteCloser) Close() error {
+	return nil
 }
