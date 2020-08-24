@@ -1,23 +1,85 @@
-# A Tailwind CSS implementation in Go (wip, check back in a week or two)
+# A Tailwind CSS implementation in Go
 
-(Planned) Features:
+Features/Roadmap:
 
-- Command Line
-- Test server for prototyping
-- Pure Go library, no npm/node dependency
-- HTTP Handler
-- Purge functionality to minimize output file size
-- Can produce .go output for embedding
+- [x] Command line build tool
+- [x] Pure Go library, no npm/node dependency
+- [x] HTTP Handler
+- [x] Purge functionality to minimize output file size
+- [ ] Test server for prototyping
 
 ## Typical Usage
 
 (show small standalone Go program with HTTP handler, compression and purging)
+
+static/index.html
+```html
+<!doctype html>
+<html>
+    <head>
+        <link rel="stylesheet" href="/css/main.css"/>
+    </head>
+    <body>
+        <a href="#" class="button">Test Button</a>
+    </body>
+</html>
+```
+
+css/main.css
+```css
+@tailwind base;
+@tailwind components;
+
+.button {
+    @apply inline-block m-2 p-2 rounded-md text-lg leading-tight font-semibold text-gray-900 bg-green-400;
+}
+
+@tailwind utilities;
+```
+
+main.go:
+```go
+package main
+
+import (
+	"io"
+	"log"
+	"net/http"
+
+	"github.com/gotailwindcss/tailwind"
+	"github.com/gotailwindcss/tailwind/twembed"
+	"github.com/gotailwindcss/tailwind/twhandler"
+)
+
+func main() {
+
+	staticDir := http.Dir("static")
+
+	indexH := http.FileServer(staticDir)
+
+	tailwindH := twhandler.NewFromFunc(http.Dir("css"), "/css", func(w io.Writer) *tailwind.Converter {
+		ret := tailwind.New(w, twembed.New())
+		return ret
+	})
+
+	mux := http.NewServeMux()
+	mux.Handle("/", indexH)
+	mux.Handle("/css/", tailwindH)
+
+	s := &http.Server{Addr: ":8182", Handler: mux}
+	log.Fatal(s.ListenAndServe())
+
+}
+```
 
 ## In Production
 
 (recommend just using static files in production - hmm, what about file hashes and such...)
 
 ## Supported Tailwind CSS Directives
+
+- `@tailwind`
+- `@apply`
 
 ## Command Line
 
@@ -39,12 +101,58 @@
 
 (reduce file size)
 
-### Purging: Scanning + Checking Approach
-
-(a bit more work to setup and use, but more efficient and gives the same results in dev and production)
-
-### Purging: Automatic
+### Standalone Example
 
 (less work to setup and maintain but runs slower)
+
+```go
+package main
+
+import (
+	"io"
+	"log"
+	"net/http"
+	"path/filepath"
+
+	"github.com/gotailwindcss/tailwind"
+	"github.com/gotailwindcss/tailwind/twembed"
+	"github.com/gotailwindcss/tailwind/twhandler"
+	"github.com/gotailwindcss/tailwind/twpurge"
+)
+
+func main() {
+
+	staticDir := http.Dir("static")
+
+	indexH := http.FileServer(staticDir)
+
+	pscanner, err := twpurge.NewScannerFromDist(twembed.New())
+	if err != nil {
+		panic(err)
+	}
+	err = filepath.Walk("static", pscanner.WalkFunc(twpurge.MatchDefault))
+	if err != nil {
+		panic(err)
+	}
+
+	tailwindH := twhandler.NewFromFunc(http.Dir("css"), "/css", func(w io.Writer) *tailwind.Converter {
+		ret := tailwind.New(w, twembed.New())
+		ret.SetPurgeChecker(pscanner.Map())
+		return ret
+	})
+
+	mux := http.NewServeMux()
+	mux.Handle("/", indexH)
+	mux.Handle("/css/", tailwindH)
+
+	s := &http.Server{Addr: ":8182", Handler: mux}
+	log.Fatal(s.ListenAndServe())
+
+}
+```
+
+### Purge Scan at Code-Generation-Time
+
+(a bit more work to setup and use, but more efficient and gives the same results in dev and production)
 
 ## Embedding in Go Code
