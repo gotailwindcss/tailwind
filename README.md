@@ -8,11 +8,15 @@ Features/Roadmap:
 - [x] Purge functionality to minimize output file size
 - [ ] Test server for prototyping
 
+## Documentation
+
+https://pkg.go.dev/github.com/gotailwindcss/tailwind/
+
 ## Typical Usage
 
 (show small standalone Go program with HTTP handler, compression and purging)
 
-static/index.html
+### static/index.html
 ```html
 <!doctype html>
 <html>
@@ -25,7 +29,7 @@ static/index.html
 </html>
 ```
 
-css/main.css
+### css/main.css
 ```css
 @tailwind base;
 @tailwind components;
@@ -37,7 +41,7 @@ css/main.css
 @tailwind utilities;
 ```
 
-main.go:
+### main.go
 ```go
 package main
 
@@ -74,7 +78,9 @@ func main() {
 
 ## In Production
 
-(recommend just using static files in production - hmm, what about file hashes and such...)
+In production we recommend you use a simple static file server whever possible, e.g. `http.FileServer(distDir)`.
+
+See *Procesing CSS Files* below for more info on how to create output from the command line, or *Library Usage* for how to perform Tailwind CSS conversion from Go.
 
 ## Supported Tailwind CSS Directives
 
@@ -86,6 +92,8 @@ func main() {
 ### Processing CSS Files
 
 ### Test Server
+
+TODO: Create test server as part of `gotailwindcss` command line tool.
 
 ## Library Usage
 
