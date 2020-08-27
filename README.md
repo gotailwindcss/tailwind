@@ -10,7 +10,7 @@ Godoc can be found in the usual place: https://pkg.go.dev/github.com/gotailwindc
 
 For development, the typical use is to integrate the handler found in `twhandler` so Tailwind CSS processing is done on the file as your CSS file is served.  Example:
 
-### main.go
+**main.go**
 ```go
 // ...
 import "github.com/gotailwindcss/tailwind/twembed"
@@ -20,13 +20,13 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir("static")))
 	mux.Handle("/css/", twhandler.New(http.Dir("css"), "/css", twembed.New()))
-	
+
 	s := &http.Server{Addr: ":8182", Handler: mux}
 	log.Fatal(s.ListenAndServe())
 }
 ```
 
-### static/index.html
+**static/index.html**
 ```html
 <html>
     <head><link rel="stylesheet" href="/css/main.css"/></head>
@@ -34,7 +34,7 @@ func main() {
 </html>
 ```
 
-### css/main.css
+**css/main.css**
 ```css
 @tailwind base;
 @tailwind components;
