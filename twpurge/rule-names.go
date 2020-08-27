@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/tdewolff/parse/v2"
 	"github.com/tdewolff/parse/v2/css"
 )
 
@@ -90,7 +91,8 @@ foundEsc:
 func PurgeKeysFromReader(cssR io.Reader) (map[string]struct{}, error) {
 	ret := make(map[string]struct{})
 
-	p := css.NewParser(cssR, false)
+	inp := parse.NewInput(cssR)
+	p := css.NewParser(inp, false)
 
 mainLoop:
 	for {
@@ -127,7 +129,7 @@ mainLoop:
 		case css.CommentGrammar:
 
 		default: // verify we aren't missing a type
-			panic(fmt.Errorf("unexpected grammar type %v at offset %v", gt, p.Offset()))
+			panic(fmt.Errorf("unexpected grammar type %v at offset %v", gt, inp.Offset()))
 
 		}
 

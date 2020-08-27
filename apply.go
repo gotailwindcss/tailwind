@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/tdewolff/parse/v2"
 	"github.com/tdewolff/parse/v2/css"
 )
 
@@ -42,7 +43,8 @@ func newApplier(dist Dist) (*applier, error) {
 	var entryData bytes.Buffer
 	_ = entryData
 
-	p := css.NewParser(rc, false)
+	inp := parse.NewInput(rc)
+	p := css.NewParser(inp, false)
 parseLoop:
 	for {
 
@@ -144,7 +146,7 @@ parseLoop:
 			continue // strip comments
 
 		default: // verify we aren't missing a type
-			panic(fmt.Errorf("unexpected grammar type %v at offset %v", gt, p.Offset()))
+			panic(fmt.Errorf("unexpected grammar type %v at offset %v", gt, inp.Offset()))
 
 		}
 

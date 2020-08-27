@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/tdewolff/parse/v2"
 	"github.com/tdewolff/parse/v2/css"
 )
 
@@ -117,9 +118,10 @@ func (c *Converter) Run() (reterr error) {
 	}
 
 	for _, in := range c.inputs {
-		p := css.NewParser(in.r, in.isInline)
+		inp := parse.NewInput(in.r)
+		p := css.NewParser(inp, in.isInline)
 
-		err := c.runParse(in.name, p, w, false)
+		err := c.runParse(in.name, p, inp, w, false)
 		if err != nil {
 			return err
 		}
@@ -129,7 +131,7 @@ func (c *Converter) Run() (reterr error) {
 	return nil
 }
 
-func (c *Converter) runParse(name string, p *css.Parser, w io.Writer, doPurge bool) error {
+func (c *Converter) runParse(name string, p *css.Parser, inp *parse.Input, w io.Writer, doPurge bool) error {
 
 	// set to true when we enter a ruleset that we're omitting from the output
 	inPurgeRule := false
@@ -176,8 +178,9 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer, doPurge bo
 					}
 					defer rc.Close()
 
-					subp := css.NewParser(rc, false)
-					err = c.runParse("[tailwind-dist/base]", subp, w, false)
+					subpi := parse.NewInput(rc)
+					subp := css.NewParser(subpi, false)
+					err = c.runParse("[tailwind-dist/base]", subp, subpi, w, false)
 					if err != nil {
 						return err
 					}
@@ -190,8 +193,9 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer, doPurge bo
 					}
 					defer rc.Close()
 
-					subp := css.NewParser(rc, false)
-					err = c.runParse("[tailwind-dist/components]", subp, w, false)
+					subpi := parse.NewInput(rc)
+					subp := css.NewParser(subpi, false)
+					err = c.runParse("[tailwind-dist/components]", subp, subpi, w, false)
 					if err != nil {
 						return err
 					}
@@ -204,8 +208,9 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer, doPurge bo
 					}
 					defer rc.Close()
 
-					subp := css.NewParser(rc, false)
-					err = c.runParse("[tailwind-dist/utilities]", subp, w, true) // for utilities we enable purging (if available)
+					subpi := parse.NewInput(rc)
+					subp := css.NewParser(subpi, false)
+					err = c.runParse("[tailwind-dist/utilities]", subp, subpi, w, true) // for utilities we enable purging (if available)
 					if err != nil {
 						return err
 					}
@@ -317,7 +322,7 @@ func (c *Converter) runParse(name string, p *css.Parser, w io.Writer, doPurge bo
 			continue // strip comments
 
 		default: // verify we aren't missing a type
-			panic(fmt.Errorf("%s: unexpected grammar type %v at offset %v", name, gt, p.Offset()))
+			panic(fmt.Errorf("%s: unexpected grammar type %v at offset %v", name, gt, inp.Offset()))
 
 		}
 
