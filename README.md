@@ -55,7 +55,7 @@ The following Tailwind directives are supported:
 - `@tailwind`
 - `@apply`
 
-These are intended to work with the same behavior as the [https://tailwindcss.com/](Tailwind) project.  If differences are encountered/necessary this section will be updated as applicable.
+These are intended to work with the same behavior as the [Tailwind](https://tailwindcss.com/) project.  If differences are encountered/necessary this section will be updated as applicable.
 
 ## Command Line
 
@@ -88,11 +88,11 @@ TODO: Create test server as part of `gotailwindcss` command line tool.
 
 This project is organized into the following packages:
 
-- **[https://pkg.go.dev/github.com/gotailwindcss/tailwind](tailwind)** - Handles CSS conversion and Tailwind processing logic
-- **[https://pkg.go.dev/github.com/gotailwindcss/tailwind/twhandler](twhandler)** - HTTP Handler for processing CSS files
-- **[https://pkg.go.dev/github.com/gotailwindcss/tailwind/twpurge](twpurge)** - Handles purging unused style rules
-- **[https://pkg.go.dev/github.com/gotailwindcss/tailwind/twembed](twembed)** - Contains an embedded copy of Tailwind CSS styles
-- **[https://pkg.go.dev/github.com/gotailwindcss/tailwind/twfiles](twfiles)** - Facilitates using a directory as source for Tailwind CSS styles
+- **[tailwind](https://pkg.go.dev/github.com/gotailwindcss/tailwind)** - Handles CSS conversion and Tailwind processing logic
+- **[twhandler](https://pkg.go.dev/github.com/gotailwindcss/tailwind/twhandler)** - HTTP Handler for processing CSS files
+- **[twpurge](https://pkg.go.dev/github.com/gotailwindcss/tailwind/twpurge)** - Handles purging unused style rules
+- **[twembed](https://pkg.go.dev/github.com/gotailwindcss/tailwind/twembed)** - Contains an embedded copy of Tailwind CSS styles
+- **[twfiles](https://pkg.go.dev/github.com/gotailwindcss/tailwind/twfiles)** - Facilitates using a directory as source for Tailwind CSS styles
 
 ### Embedded TailwindCSS
 
