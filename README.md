@@ -8,7 +8,7 @@ Godoc can be found in the usual place: https://pkg.go.dev/github.com/gotailwindc
 
 ## Typical Usage
 
-For development, the typical use is to integrate the handler found in `twhandler` so Tailwind CSS processing is done on the file as your CSS file is served.  Example:
+For development, the typical use is to integrate the handler found in `twhandler` so Tailwind CSS processing is done as your CSS file is served.  Example:
 
 **main.go**
 ```go
@@ -144,6 +144,9 @@ And by default, responses do not have a browser caching max-age, so each load re
 
 ## Purging
 
+TODO: write doc and example
+
+<!--
 (reduce file size)
 
 ### Standalone Example
@@ -201,6 +204,7 @@ func main() {
 (a bit more work to setup and use, but more efficient and gives the same results in dev and production)
 
 ## Embedding in Go Code
+-->
 
 ## See Also
 
