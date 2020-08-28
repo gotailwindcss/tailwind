@@ -109,14 +109,38 @@ var w bytes.Buffer
 conv := tailwind.New(&w, twembed.New())
 conv.AddReader("base.css", strings.NewReader(`@tailwind base;`), false)
 err := conv.Run()
-// w now has the processed output
+// w now has the processed CSS output
 ```
 
 ## HTTP Handler
 
+The `twhandler` package has an HTTP handler intended to be useful during development by performing CSS processing on the fly as the file is requested.  Creating a handler is simple:
+
+```
+h := twhandler.New(
+	http.Dir("/path/to/css"), // directory from which to read input CSS files
+	"/css",                   // HTTP path prefix to expect
+	twembed.New(),            // Tailwind distribution
+)
+```
+
+From there it is used like any other `http.Handler`.
+
 ### Compression
 
+The [SetWriteCloserFunc](https://pkg.go.dev/github.com/gotailwindcss/tailwind/twhandler?tab=doc#Handler.SetWriteCloserFunc) can be used in conjunction with [brotli.HTTPCompressor](https://pkg.go.dev/github.com/andybalholm/brotli?tab=doc#HTTPCompressor) in order to enable brotli and gzip compression.  Example:
+
+```
+h := twhandler.New(http.Dir("/path/to/css"), "/css", twembed.New())
+h.SetWriteCloserFunc(brotli.HTTPCompressor)
+// ...
+```
+
 ### Caching
+
+By default, caching is enabled on handlers created.  Meaning the same output will be served without re-processing as long as the underlying input CSS file's timestamp is not modified.
+
+And by default, responses do not have a browser caching max-age, so each load results in a new request back to the server to check for a modified file.  This can be adjusted with [SetMaxAge](https://pkg.go.dev/github.com/gotailwindcss/tailwind/twhandler?tab=doc#Handler.SetMaxAge) if needed.
 
 ## Purging
 
