@@ -42,7 +42,6 @@ func main() {
 @tailwind utilities;
 ```
 
-
 ## In Production
 
 In production we recommend you use a simple static file server whever possible, e.g. `http.FileServer(distDir)`.
@@ -51,20 +50,67 @@ See *Procesing CSS Files* below for more info on how to create output from the c
 
 ## Supported Tailwind CSS Directives
 
+The following Tailwind directives are supported:
+
 - `@tailwind`
 - `@apply`
 
+These are intended to work with the same behavior as the [https://tailwindcss.com/](Tailwind) project.  If differences are encountered/necessary this section will be updated as applicable.
+
 ## Command Line
+
+To install the gotailwindcss command, do:
+
+```
+go get github.com/gotailwindcss/tailwind/cmd/gotailwindcss
+```
+
+Once installed, for help:
+
+```
+gotailwindcss --help
+```
 
 ### Processing CSS Files
 
-### Test Server
+Use the `build` subcommand to perform processing on one or more CSS files.
 
+```
+gotailwindcss build -o out.css in1.css in2.css
+```
+
+<!--
+### Test Server
 TODO: Create test server as part of `gotailwindcss` command line tool.
+-->
 
 ## Library Usage
 
+This project is organized into the following packages:
+
+- **[https://pkg.go.dev/github.com/gotailwindcss/tailwind](tailwind)** - Handles CSS conversion and Tailwind processing logic
+- **[https://pkg.go.dev/github.com/gotailwindcss/tailwind/twhandler](twhandler)** - HTTP Handler for processing CSS files
+- **[https://pkg.go.dev/github.com/gotailwindcss/tailwind/twpurge](twpurge)** - Handles purging unused style rules
+- **[https://pkg.go.dev/github.com/gotailwindcss/tailwind/twembed](twembed)** - Contains an embedded copy of Tailwind CSS styles
+- **[https://pkg.go.dev/github.com/gotailwindcss/tailwind/twfiles](twfiles)** - Facilitates using a directory as source for Tailwind CSS styles
+
 ### Embedded TailwindCSS
+
+To process "convert" files, a "Dist" (distribution) of Tailwind CSS is required.  The `twembed` package provides this.   Importing it embeds this data into your application, which is usually file for server applications.
+
+Calling `twembed.New()` will return a new `Dist` corresponding to this embedded CSS.  It is intentionally inexpensive to call and there is no need to retain an instance as opposed ot calling `twembed.New()` again.
+
+### Performing Conversion
+
+A `tailwind.Convert` is used to perform processing of directives like `@tailwind` and `@apply`. Example:
+
+```
+var w bytes.Buffer
+conv := tailwind.New(&w, twembed.New())
+conv.AddReader("base.css", strings.NewReader(`@tailwind base;`), false)
+err := conv.Run()
+// w now has the processed output
+```
 
 ## HTTP Handler
 
@@ -131,6 +177,10 @@ func main() {
 (a bit more work to setup and use, but more efficient and gives the same results in dev and production)
 
 ## Embedding in Go Code
+
+## See Also
+
+This project was created as part of research while developing [https://vugu.org/](Vugu) ([https://github.com/vugu/vugu](doc)).
 
 ## Roadmap
 
