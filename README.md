@@ -208,7 +208,7 @@ func main() {
 
 ## See Also
 
-This project was created as part of research while developing [https://vugu.org/](Vugu) ([https://github.com/vugu/vugu](doc)).
+This project was created as part of research while developing [Vugu](https://vugu.org/) ([doc](https://github.com/vugu/vugu)).
 
 ## Roadmap
 
