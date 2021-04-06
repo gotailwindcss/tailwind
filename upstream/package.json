@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "@tailwindcss/aspect-ratio": "^0.2.0",
+    "@tailwindcss/forms": "^0.3.2",
+    "@tailwindcss/line-clamp": "^0.2.0",
+    "@tailwindcss/typography": "^0.4.0",
+    "npx": "^10.2.2",
+    "tailwindcss": "^2.0.4"
+  }
+}
